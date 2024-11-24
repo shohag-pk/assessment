@@ -10,6 +10,7 @@ import com.shohag.assessment.repository.InboxRepository;
 import com.shohag.assessment.repository.KeywordDetailsRepository;
 import com.shohag.assessment.service.ContentProcessService;
 import com.shohag.assessment.service.UnlockService;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
@@ -19,6 +20,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
+@Slf4j
 @Service
 public class ContentProcessServiceImpl implements ContentProcessService {
     @Value("${restclient.base-url}")
@@ -78,7 +80,7 @@ public class ContentProcessServiceImpl implements ContentProcessService {
                         inbox.setCreatedAt(LocalDateTime.now());
 
                         String[] sms = content.getSms().split(" ");
-                        if (sms.length >= 3) {
+                        if (sms.length >= 2) {
                             inbox.setKeyword(sms[0]);
                             inbox.setGameName(sms[1]);
                         }
@@ -91,8 +93,10 @@ public class ContentProcessServiceImpl implements ContentProcessService {
 
         List<Inbox> inboxList = inboxRepository.findAll();
 
+        log.info("Inbox list size is {} ", inboxList.size());
+
         inboxList.forEach(inbox -> {
-            Optional<KeywordDetails> optionalKeywordDetails = keywordDetailsRepository.findById(inbox.getKeyword());
+            Optional<KeywordDetails> optionalKeywordDetails = keywordDetailsRepository.findById(inbox.getKeyword() != null? inbox.getKeyword() : "None");
             if (optionalKeywordDetails.isPresent()) {
                 smsProcessService.smsProcessWithTaskExecutor(inbox);
                // unlockService.getUnlockCode(inbox);
