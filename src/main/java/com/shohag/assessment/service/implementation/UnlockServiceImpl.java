@@ -47,28 +47,39 @@ public class UnlockServiceImpl implements UnlockService {
     }
 
 
+    // Processes an Inbox entry to retrieve an unlock code and perform a charge.
     @Override
     public boolean getUnlockCode(Inbox inbox) {
+        // Map the Inbox entity to an UnlockCodeRequest model.
         UnlockCodeRequest unlockCodeRequest = toUnlockCodeRequest(inbox);
+
+        // Call the external unlock code API.
         UnlockCodeResponse unlockCodeResponse = restClient
                 .post()
                 .uri(baseUrl + "/a55dbz923ace647v/api/v1.0/services/unlockCode")
                 .body(unlockCodeRequest)
                 .retrieve()
-                .onStatus(status -> status.value() != 200,
+                .onStatus(status -> status.value() != 200,   // Handle non-200 HTTP responses.
                         ((request, response) -> {
+                            log.warn("Unlock code request failed with status: {}", response.getStatusCode());
                             response.getStatusCode();
                         }))
                 .body(UnlockCodeResponse.class);
 
         if (unlockCodeResponse != null && unlockCodeResponse.getStatusCode() == 200) {
-            log.info("unlockCodeResponse is  : "+unlockCodeResponse.getStatusCode());
+            log.info("Unlock code API responded successfully for SMS ID: {}", inbox.getId());
+
+            // Retrieve charge configuration for the operator.
             Optional<ChargeConfig> optionalChargeConfig = chargeConfigRepository.findById(unlockCodeResponse.getOperator());
 
             if (optionalChargeConfig.isPresent()) {
+
+                // Map the response to a ChargeRequestModel.
                 ChargeRequestModel chargeRequestModel = mapToChargeRequest(unlockCodeResponse, optionalChargeConfig.get().getChargeCode());
 
 
+                // Call the external charge API.
+                log.info("Sending charge request for SMS ID: {}", inbox.getId());
                 ChargeResponseModel chargeResponseModel = restClient
                         .post()
                         .uri(baseUrl + "/a55dbz923ace647v/api/v1.0/services/charge")
@@ -76,14 +87,16 @@ public class UnlockServiceImpl implements UnlockService {
                         .retrieve()
                         .onStatus(status -> status.value() != 200,
                                 ((request, response) -> {
+                                    log.warn("Charge API returned non-200 status for SMS ID: {}. Status: {}", inbox.getId(), response.getStatusCode());
                                     response.getStatusCode();
                                 }))
                         .body(ChargeResponseModel.class);
 
                 if (chargeResponseModel != null && chargeResponseModel.getStatusCode() == 200) {
 
-                    log.info("chargeResponseModel is  : "+chargeResponseModel.getStatusCode());
+                    log.info("Charge API successful for SMS ID: {}. Response status: {}", inbox.getId(), chargeResponseModel.getStatusCode());
 
+                    // Log success and update records for successful charges.
                     ChargeSuccessLog successLog = new ChargeSuccessLog();
                     successLog.setSmsId(inbox.getId());
                     successLog.setTransactionId(chargeResponseModel.getTransactionId());
@@ -94,6 +107,7 @@ public class UnlockServiceImpl implements UnlockService {
                     successLog.setOperator(inbox.getOperator());
 
                     chargeSuccessLogRepository.save(successLog);
+                    log.debug("Charge success log saved for SMS ID: {}", inbox.getId());
 
                     inbox.setStatus("S");
                     inbox.setUpdatedAt(LocalDateTime.now());
@@ -101,6 +115,9 @@ public class UnlockServiceImpl implements UnlockService {
 
                 } else {
 
+                    log.warn("Charge API failed for SMS ID: {}", inbox.getId());
+
+                    // Log failure and update records for failed charges.
                     ChargeFailureLog failureLog = new ChargeFailureLog();
                     failureLog.setSmsId(inbox.getId());
                     failureLog.setTransactionId(inbox.getTransactionId());
@@ -111,6 +128,7 @@ public class UnlockServiceImpl implements UnlockService {
                     failureLog.setOperator(inbox.getOperator());
 
                     chargeFailureLogRepository.save(failureLog);
+                    log.debug("Charge failure log saved for SMS ID: {}", inbox.getId());
 
                     inbox.setStatus("F");
                     inbox.setUpdatedAt(LocalDateTime.now());
@@ -120,6 +138,7 @@ public class UnlockServiceImpl implements UnlockService {
         }
 
 
+        log.info("Completed unlock code processing for SMS ID: {}", inbox.getId());
         return true;
     }
 
